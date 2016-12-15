@@ -1,0 +1,21 @@
+[package]
+name = "rawslice"
+version = "0.1.0"
+authors = ["bluss"]
+license = "MIT/Apache-2.0"
+
+description = """
+Reimplementation of the slice iterators, with extra features. For example
+creation from raw pointers and start, end pointer accessors.
+"""
+
+repository = "https://github.com/bluss/rawslice/"
+documentation = "https://docs.rs/rawslice/"
+
+keywords = ["no_std", "raw", "slice", "iterator"]
+
+[dependencies]
+rawpointer = "0.1"
+
+[dev-dependencies]
+quickcheck = { version = "0.4", default-features = false }
