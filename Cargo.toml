@@ -1,4 +1,4 @@
-[package]
+#1703815[package]
 name = "rawslice"
 version = "0.1.0"
 authors = ["bluss"]
@@ -18,4 +18,4 @@ keywords = ["no_std", "raw", "slice", "iterator"]
 rawpointer = "0.1"
 
 [dev-dependencies]
-quickcheck = { version = "0.4", default-features = false }
+quickcheck = { version = "0.8", default-features = false }
