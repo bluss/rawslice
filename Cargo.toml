@@ -14,8 +14,17 @@ documentation = "https://docs.rs/rawslice/"
 
 keywords = ["no_std", "raw", "slice", "iterator"]
 
+[lib]
+bench = false
+
 [dependencies]
 rawpointer = "0.2"
 
 [dev-dependencies]
 quickcheck = { version = "0.4", default-features = false }
+bencher = "0.1"
+
+[[bench]]
+name = "unroll"
+harness = false
+
