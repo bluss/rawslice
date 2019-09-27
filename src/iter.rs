@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::ops::Index;
 use std::slice;
 use std::slice::{Iter as CoreSliceIter};
+use std::ptr::NonNull;
 
 use rawpointer::PointerExt;
 use rawpointer::ptrdistance;
@@ -41,14 +42,22 @@ use rawpointer::ptrdistance;
 /// + No support for zero-sized iterator element type
 #[derive(Debug)]
 pub struct SliceIter<'a, T: 'a> {
-    ptr: *const T,
-    end: *const T,
+    ptr: NonNull<T>,
+    end: NonNull<T>,
     ty: PhantomData<&'a T>,
 }
 
 impl<'a, T> Copy for SliceIter<'a, T> { }
 impl<'a, T> Clone for SliceIter<'a, T> {
     fn clone(&self) -> Self { *self }
+}
+
+// Same bound as std::slice::Iter
+unsafe impl<'a, T> Send for SliceIter<'a, T> where T: Sync { }
+
+unsafe fn nonnull<T>(p: *const T) -> NonNull<T> {
+    debug_assert!(!p.is_null());
+    NonNull::new_unchecked(p as _)
 }
 
 impl<'a, T> SliceIter<'a, T> {
@@ -61,20 +70,20 @@ impl<'a, T> SliceIter<'a, T> {
     pub unsafe fn new(start: *const T, end: *const T) -> Self {
         assert!(size_of::<T>() != 0);
         SliceIter {
-            ptr: start,
-            end: end,
+            ptr: nonnull(start),
+            end: nonnull(end),
             ty: PhantomData,
         }
     }
 
     /// Return the start pointer
     pub fn start(&self) -> *const T {
-        self.ptr
+        self.ptr.as_ptr() as _
     }
 
     /// Return the end pointer
     pub fn end(&self) -> *const T {
-        self.end
+        self.end.as_ptr() as _
     }
 
     /// Return mutable reference to the start pointer
@@ -82,7 +91,8 @@ impl<'a, T> SliceIter<'a, T> {
     /// Unsafe because it is easy to violate memory safety by setting
     /// the pointer outside the data's valid range.
     pub unsafe fn start_mut(&mut self) -> &mut *const T {
-        &mut self.ptr
+        panic!()
+        //&mut self.ptr
     }
 
     /// Return mutable reference to the start pointer
@@ -90,14 +100,15 @@ impl<'a, T> SliceIter<'a, T> {
     /// Unsafe because it is easy to violate memory safety by setting
     /// the pointer outside the data's valid range.
     pub unsafe fn end_mut(&mut self) -> &mut *const T {
-        &mut self.end
+        panic!()
+        //&mut self.end
     }
 
     /// Return the next iterator element, without stepping the iterator.
     pub fn peek_next(&self) -> Option<<Self as Iterator>::Item> {
         if self.ptr != self.end {
             unsafe {
-                Some(&*self.ptr)
+                Some(&*self.ptr.as_ptr())
             }
         } else {
             None
@@ -107,19 +118,19 @@ impl<'a, T> SliceIter<'a, T> {
     /// Return the equivalent slice
     pub fn as_slice(&self) -> &'a [T] {
         unsafe {
-            slice::from_raw_parts(self.ptr, self.len())
+            slice::from_raw_parts(self.ptr.as_ptr(), self.len())
         }
     }
 
     /// Return the next iterator element, without checking if the end is reached
     #[inline]
     pub unsafe fn next_unchecked(&mut self) -> <Self as Iterator>::Item {
-        &*self.ptr.post_inc()
+        &*self.ptr.post_inc().as_ptr()
     }
 
     /// Return a reference to the element at `i`.
     pub unsafe fn get_unchecked(&self, i: usize) -> &T {
-        &*self.ptr.offset(i as isize)
+        &*self.ptr.as_ptr().add(i)
     }
 }
 
@@ -129,7 +140,7 @@ impl<'a, T> Iterator for SliceIter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.ptr != self.end {
             unsafe {
-                Some(&*self.ptr.post_inc())
+                Some(&*self.ptr.post_inc().as_ptr())
             }
         } else {
             None
@@ -213,7 +224,7 @@ impl<'a, T> DoubleEndedIterator for SliceIter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.ptr != self.end {
             unsafe {
-                Some(&*self.end.pre_dec())
+                Some(&*self.end.pre_dec().as_ptr())
             }
         } else {
             None
@@ -223,7 +234,7 @@ impl<'a, T> DoubleEndedIterator for SliceIter<'a, T> {
 
 impl<'a, T> ExactSizeIterator for SliceIter<'a, T> {
     fn len(&self) -> usize {
-        ptrdistance(self.ptr, self.end)
+        ptrdistance(self.ptr.as_ptr(), self.end.as_ptr())
     }
 }
 
@@ -231,7 +242,7 @@ impl<'a, T> From<&'a [T]> for SliceIter<'a, T> {
     fn from(slice: &'a [T]) -> Self {
         unsafe {
             let ptr = slice.as_ptr();
-            let end = ptr.offset(slice.len() as isize);
+            let end = ptr.add(slice.len());
             SliceIter::new(ptr, end)
         }
     }
@@ -257,7 +268,7 @@ impl<'a, T> Index<usize> for SliceIter<'a, T> {
     fn index(&self, i: usize) -> &T {
         assert!(i < self.len());
         unsafe {
-            &*self.ptr.offset(i as isize)
+            &*self.ptr.add(i).as_ptr()
         }
     }
 }
@@ -303,14 +314,14 @@ impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
 
         let mut accum = init;
         unsafe {
-            while ptrdistance(self.ptr, self.end) >= 4 {
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
+            while self.len() >= 4 {
+                accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
+                accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
+                accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
+                accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
             }
             while self.ptr != self.end {
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
+                accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
             }
         }
         accum
@@ -322,14 +333,14 @@ impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
     {
         // manual unrolling is needed when there are conditional exits from the loop's body.
         unsafe {
-            while ptrdistance(self.ptr, self.end) >= 4 {
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
+            while self.len() >= 4 {
+                accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
+                accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
+                accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
+                accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
             }
             while self.ptr != self.end {
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
+                accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
             }
         }
         accum
