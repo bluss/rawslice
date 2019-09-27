@@ -10,6 +10,24 @@ use std::ptr::NonNull;
 use rawpointer::PointerExt;
 use rawpointer::ptrdistance;
 
+/// Default, no (static) unrolling
+pub enum UnrollDefault {}
+/// Explicit 4-fold unrolling in certain iterator methods
+pub enum Unroll4 {}
+
+/// Unrolling marker trait
+pub trait Unroll {
+    const UNROLL: bool;
+}
+
+impl Unroll for UnrollDefault {
+    const UNROLL: bool = false;
+}
+
+impl Unroll for Unroll4 {
+    const UNROLL: bool = true;
+}
+
 
 /// Slice (contiguous data) iterator.
 ///
@@ -41,26 +59,26 @@ use rawpointer::ptrdistance;
 /// + No `std::intrinsics::assume`.
 /// + No support for zero-sized iterator element type
 #[derive(Debug)]
-pub struct SliceIter<'a, T: 'a> {
+pub struct SliceIter<'a, T: 'a, Un = UnrollDefault> {
     ptr: NonNull<T>,
     end: NonNull<T>,
-    ty: PhantomData<&'a T>,
+    ty: PhantomData<(&'a T, Un)>,
 }
 
-impl<'a, T> Copy for SliceIter<'a, T> { }
-impl<'a, T> Clone for SliceIter<'a, T> {
+impl<'a, T, Un: Unroll> Copy for SliceIter<'a, T, Un> { }
+impl<'a, T, Un: Unroll> Clone for SliceIter<'a, T, Un> {
     fn clone(&self) -> Self { *self }
 }
 
 // Same bound as std::slice::Iter
-unsafe impl<'a, T> Send for SliceIter<'a, T> where T: Sync { }
+unsafe impl<'a, T, Un: Unroll> Send for SliceIter<'a, T, Un> where T: Sync { }
 
 unsafe fn nonnull<T>(p: *const T) -> NonNull<T> {
     debug_assert!(!p.is_null());
     NonNull::new_unchecked(p as _)
 }
 
-impl<'a, T> SliceIter<'a, T> {
+impl<'a, T, Un> SliceIter<'a, T, Un> {
     /// Create a new slice iterator
     ///
     /// See also ``SliceIter::from, SliceIter::default``.
@@ -86,26 +104,23 @@ impl<'a, T> SliceIter<'a, T> {
         self.end.as_ptr() as _
     }
 
-    /// Return mutable reference to the start pointer
-    ///
-    /// Unsafe because it is easy to violate memory safety by setting
-    /// the pointer outside the data's valid range.
-    pub unsafe fn start_mut(&mut self) -> &mut *const T {
-        panic!()
-        //&mut self.ptr
+    /// Return an explicitly unrolled version of the iterator (in `all`, `find`,
+    /// `position` and a few other methods).
+    #[inline]
+    pub fn unrolled(self) -> SliceIter<'a, T, Unroll4> {
+        SliceIter {
+            ptr: self.ptr,
+            end: self.end,
+            ty: PhantomData,
+        }
     }
 
-    /// Return mutable reference to the start pointer
-    ///
-    /// Unsafe because it is easy to violate memory safety by setting
-    /// the pointer outside the data's valid range.
-    pub unsafe fn end_mut(&mut self) -> &mut *const T {
-        panic!()
-        //&mut self.end
+    fn len(&self) -> usize {
+        ptrdistance(self.ptr.as_ptr(), self.end.as_ptr())
     }
 
     /// Return the next iterator element, without stepping the iterator.
-    pub fn peek_next(&self) -> Option<<Self as Iterator>::Item> {
+    pub fn peek_next(&self) -> Option<&T> {
         if self.ptr != self.end {
             unsafe {
                 Some(&*self.ptr.as_ptr())
@@ -124,7 +139,7 @@ impl<'a, T> SliceIter<'a, T> {
 
     /// Return the next iterator element, without checking if the end is reached
     #[inline]
-    pub unsafe fn next_unchecked(&mut self) -> <Self as Iterator>::Item {
+    pub unsafe fn next_unchecked(&mut self) -> &T {
         &*self.ptr.post_inc().as_ptr()
     }
 
@@ -134,7 +149,7 @@ impl<'a, T> SliceIter<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for SliceIter<'a, T> {
+impl<'a, T, Un: Unroll> Iterator for SliceIter<'a, T, Un> {
     type Item = &'a T;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -219,7 +234,7 @@ impl<'a, T> Iterator for SliceIter<'a, T> {
     }
 }
 
-impl<'a, T> DoubleEndedIterator for SliceIter<'a, T> {
+impl<'a, T, Un: Unroll> DoubleEndedIterator for SliceIter<'a, T, Un> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.ptr != self.end {
@@ -232,9 +247,9 @@ impl<'a, T> DoubleEndedIterator for SliceIter<'a, T> {
     }
 }
 
-impl<'a, T> ExactSizeIterator for SliceIter<'a, T> {
+impl<'a, T, Un: Unroll> ExactSizeIterator for SliceIter<'a, T, Un> {
     fn len(&self) -> usize {
-        ptrdistance(self.ptr.as_ptr(), self.end.as_ptr())
+        self.len()
     }
 }
 
@@ -254,7 +269,7 @@ impl<'a, T> From<CoreSliceIter<'a, T>> for SliceIter<'a, T> {
     }
 }
 
-impl<'a, T> Default for SliceIter<'a, T> {
+impl<'a, T, Un> Default for SliceIter<'a, T, Un> {
     /// Create an empty `SliceIter`.
     fn default() -> Self {
         unsafe {
@@ -263,12 +278,13 @@ impl<'a, T> Default for SliceIter<'a, T> {
     }
 }
 
-impl<'a, T> Index<usize> for SliceIter<'a, T> {
+impl<'a, T, Un> Index<usize> for SliceIter<'a, T, Un> {
     type Output = T;
+    /// ***Panics*** if the index is out of bounds.
     fn index(&self, i: usize) -> &T {
         assert!(i < self.len());
         unsafe {
-            &*self.ptr.add(i).as_ptr()
+            self.get_unchecked(i)
         }
     }
 }
@@ -306,7 +322,7 @@ macro_rules! fold_while {
     }
 }
 
-impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
+impl<'a, T, Un: Unroll> FoldWhileExt for SliceIter<'a, T, Un> {
     fn fold_while<Acc, G>(&mut self, init: Acc, mut g: G) -> Acc
         where Self: Sized,
               G: FnMut(Acc, Self::Item) -> FoldWhile<Acc>
@@ -314,7 +330,7 @@ impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
 
         let mut accum = init;
         unsafe {
-            while self.len() >= 4 {
+            while Un::UNROLL && self.len() >= 4 {
                 accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
                 accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
                 accum = fold_while!(g(accum, &*self.ptr.post_inc().as_ptr()));
@@ -333,7 +349,7 @@ impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
     {
         // manual unrolling is needed when there are conditional exits from the loop's body.
         unsafe {
-            while self.len() >= 4 {
+            while Un::UNROLL && self.len() >= 4 {
                 accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
                 accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));
                 accum = fold_while!(g(accum, &*self.end.pre_dec().as_ptr()));

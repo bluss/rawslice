@@ -48,3 +48,38 @@ quickcheck! {
         v.iter().any(|x| *x == 0) == SliceIter::from(&v[..]).any(|x| *x == 0)
     }
 }
+
+pub mod unrolled {
+    use rawslice::SliceIter;
+    use super::offset;
+
+quickcheck! {
+    fn slice_iter_find(v: Vec<i8>, off: usize, pat: i8) -> bool {
+        let data = offset(&v, off);
+
+        data.iter().find(|x| **x == pat) ==
+            SliceIter::from(data).unrolled().find(|x| **x == pat)
+    }
+
+    fn slice_iter_position(v: Vec<i8>, off: usize, pat: i8) -> bool {
+        let data = offset(&v, off);
+
+        data.iter().position(|x| *x == pat) ==
+            SliceIter::from(data).unrolled().position(|x| *x == pat)
+    }
+
+    fn slice_iter_rposition(v: Vec<i8>, off: usize, pat: i8) -> bool {
+        let data = offset(&v, off);
+
+        data.iter().rposition(|x| *x == pat) ==
+            SliceIter::from(data).unrolled().rposition(|x| *x == pat)
+    }
+
+    fn slice_iter_all(v: Vec<i8>) -> bool {
+        v.iter().all(|x| *x == 0) == SliceIter::from(&v[..]).unrolled().all(|x| *x == 0)
+    }
+    fn slice_iter_any(v: Vec<i8>) -> bool {
+        v.iter().any(|x| *x == 0) == SliceIter::from(&v[..]).unrolled().any(|x| *x == 0)
+    }
+}
+}
