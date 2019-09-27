@@ -17,14 +17,8 @@ use rawpointer::ptrdistance;
 /// This iterator exists mainly to have the constructor from a pair
 /// of raw pointers available, which the libcore slice iterator does not allow.
 ///
-/// The SliceIter's element searching methods `all, find, position, rposition`
-/// are explicitly unrolled so that they often perform better than the libcore
-/// slice iterator's variants of those.
-///
 /// **Extra Features:**
 ///
-/// + unrolled `all, find, position, rposition`,
-/// + accessors (incl. mutable) of start, end pointers
 /// + construct from raw pointers
 /// + native `peek_next`
 /// + native `next_unchecked`.
@@ -264,7 +258,7 @@ impl<'a, T> Index<usize> for SliceIter<'a, T> {
 
 
 
-// Fold while implements unrolled searching
+// Fold while could implement unrolled searching
 
 #[derive(Copy, Clone, Debug)]
 /// An enum used for controlling the execution of `.fold_while()`.
@@ -300,15 +294,8 @@ impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
         where Self: Sized,
               G: FnMut(Acc, Self::Item) -> FoldWhile<Acc>
     {
-
         let mut accum = init;
         unsafe {
-            while ptrdistance(self.ptr, self.end) >= 4 {
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-                accum = fold_while!(g(accum, &*self.ptr.post_inc()));
-            }
             while self.ptr != self.end {
                 accum = fold_while!(g(accum, &*self.ptr.post_inc()));
             }
@@ -320,14 +307,7 @@ impl<'a, T> FoldWhileExt for SliceIter<'a, T> {
         where Self: Sized,
               G: FnMut(Acc, Self::Item) -> FoldWhile<Acc>
     {
-        // manual unrolling is needed when there are conditional exits from the loop's body.
         unsafe {
-            while ptrdistance(self.ptr, self.end) >= 4 {
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-                accum = fold_while!(g(accum, &*self.end.pre_dec()));
-            }
             while self.ptr != self.end {
                 accum = fold_while!(g(accum, &*self.end.pre_dec()));
             }
