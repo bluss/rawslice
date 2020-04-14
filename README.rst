@@ -13,6 +13,10 @@ __ https://docs.rs/rawslice/
 Recent Changes
 --------------
 
+- 0.1.1
+
+  - Update rawpointer dep
+
 - 0.1.0
 
   - Initial release
